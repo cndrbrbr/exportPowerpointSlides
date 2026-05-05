@@ -221,6 +221,7 @@ def process_powerpoint(powerpoint_file: Path, target_root: Path, log):
     for i, slide in enumerate(prs.slides, start=1):
         raw_title = get_slide_title(slide, i)
         clean_title = safe_filename(raw_title, f"Folie_{i:03d}")
+
         slide_titles.append(clean_title)
 
 
@@ -252,12 +253,12 @@ def process_powerpoint(powerpoint_file: Path, target_root: Path, log):
 
     for i, png in enumerate(png_files, start=1):
         if i <= len(slide_titles):
-            raw_title = slide_titles[i - 1]
+            clean_title = slide_titles[i - 1]
         else:
-            raw_title = f"Folie_{i:03d}"
+            clean_title = f"Folie_{i:03d}"
 
-        clean_title = safe_filename(raw_title, f"Folie_{i:03d}")
-        target_png = unique_path(result_dir / f"{clean_title}.png")
+        filename = f"{i:03d}_{clean_title}.png"
+        target_png = unique_path(result_dir / filename)
 
         png.replace(target_png)
         log(f"PNG gespeichert: {target_png.name}")
