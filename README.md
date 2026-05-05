@@ -131,12 +131,15 @@ exporter.py
 
 ---
 
-### 2. pywin32 installieren
+### 2. pywin32 und python-pptx installieren
 
 ```powershell
-& "C:\Program Files\Python311\python.exe" -m pip install pywin32
+& "C:\Program Files\Python311\python.exe" -m pip install pywin32 python-pptx
 ```
-
+Optional (falls Probleme mit pywin32 auftreten):
+```powershell
+& "C:\Program Files\Python311\python.exe" -m pip install --upgrade --force-reinstall pywin32 --no-user
+```
 ---
 
 ### 3. Test (optional)
