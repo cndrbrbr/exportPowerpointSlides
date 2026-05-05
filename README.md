@@ -1,6 +1,6 @@
 # exportPowerpointSlides
 exports Powerpoint slides to png and text information to txt
-# 📊 PowerPoint Extractor (Windows)
+# PowerPoint Extractor (Windows)
 
 Ein Python-Tool mit GUI zum automatischen Verarbeiten von PowerPoint-Dateien:
 
@@ -10,9 +10,9 @@ Ein Python-Tool mit GUI zum automatischen Verarbeiten von PowerPoint-Dateien:
 
 ---
 
-## 🚀 Features
+## Features
 
-### 🔍 Dateiverarbeitung
+### Dateiverarbeitung
 - Durchsucht einen Ordner **rekursiv**
 - Unterstützt:
   - `.pptx`
@@ -21,7 +21,7 @@ Ein Python-Tool mit GUI zum automatischen Verarbeiten von PowerPoint-Dateien:
 
 ---
 
-### 📁 Strukturierte Ausgabe
+### Strukturierte Ausgabe
 Für jede PowerPoint wird automatisch ein Ordner erzeugt:
 
 ```text
@@ -36,7 +36,7 @@ Beispiel:
 
 ---
 
-### 🖼️ Folienexport
+### Folienexport
 - Jede Folie wird als PNG exportiert
 - Dateiname = Folientitel (bereinigt)
 - Beispiel:
@@ -82,7 +82,7 @@ Nur wenn vorhanden.
 
 ---
 
-### 🖥️ GUI
+###  GUI
 - Auswahl von:
   - Source Folder
   - Zielordner
@@ -91,27 +91,27 @@ Nur wenn vorhanden.
 
 ---
 
-### ⚙️ Technik
+###  Technik
 - Nutzung von **Microsoft PowerPoint (COM)**
 - Kein LibreOffice notwendig
 - Hohe Qualität beim PNG-Export
 
 ---
 
-## 📦 Voraussetzungen
+##  Voraussetzungen
 
-### ✅ System
+###  System
 - Windows
 - Microsoft PowerPoint installiert (64-bit empfohlen)
 
 ---
 
-### ✅ Python
+###  Python
 - Python 3.10+ (empfohlen: 3.11)
 
 ---
 
-### ✅ Python-Pakete
+###  Python-Pakete
 
 Installation:
 
@@ -121,7 +121,7 @@ Installation:
 
 ---
 
-## 🔧 Installation
+##  Installation
 
 ### 1. Script speichern
 
@@ -147,7 +147,7 @@ exporter.py
 
 ---
 
-## ▶️ Starten
+##  Starten
 
 ```powershell
 & "C:\Program Files\Python311\python.exe" exporter.py
@@ -155,7 +155,7 @@ exporter.py
 
 ---
 
-## 🧪 Ablauf
+##  Ablauf
 
 1. Source Folder auswählen  
 2. Zielordner auswählen  
@@ -165,7 +165,7 @@ Das Tool verarbeitet automatisch alle PowerPoints.
 
 ---
 
-## 📂 Beispiel Ausgabe
+##  Beispiel Ausgabe
 
 ```text
 out/
@@ -179,7 +179,7 @@ out/
 
 ---
 
-## ⚠️ Bekannte Einschränkungen
+## Bekannte Einschränkungen
 
 - PowerPoint muss installiert sein
 - PowerPoint darf keine Dialoge anzeigen (z. B. „Datei reparieren“)
@@ -188,9 +188,9 @@ out/
 
 ---
 
-## 🐞 Troubleshooting
+## Troubleshooting
 
-### ❌ ModuleNotFoundError: pythoncom
+### ModuleNotFoundError: pythoncom
 
 ```powershell
 & "C:\Program Files\Python311\python.exe" -m pip install pywin32
@@ -198,7 +198,7 @@ out/
 
 ---
 
-### ❌ Keine PNGs erzeugt
+### Keine PNGs erzeugt
 
 - PowerPoint installiert?
 - Datei lässt sich manuell öffnen?
@@ -206,13 +206,13 @@ out/
 
 ---
 
-### ❌ [WinError 2] Datei nicht gefunden
+### [WinError 2] Datei nicht gefunden
 
 Wird durch Duplikat-Handling der PNG-Dateien verhindert
 
 ---
 
-### ❌ Script startet nicht in PowerShell
+### Script startet nicht in PowerShell
 
 ```powershell
 & "Pfad\zu\python.exe" script.py
@@ -220,17 +220,7 @@ Wird durch Duplikat-Handling der PNG-Dateien verhindert
 
 ---
 
-## 💡 Erweiterungsmöglichkeiten
 
-- Fortschrittsbalken
-- Drag & Drop
-- Parallelverarbeitung
-- Export als PDF zusätzlich
-- OCR für Bilder
-- KI-Zusammenfassung der Inhalte
-
----
-
-## 📜 Lizenz
+## Lizenz
 
 Frei nutzbar für private und interne Zwecke.
