@@ -1,0 +1,372 @@
+import re
+import threading
+import traceback
+from datetime import datetime
+from pathlib import Path
+from tkinter import (
+    Tk, Label, Entry, Button, filedialog, Text, END, StringVar, messagebox
+)
+
+import pythoncom
+import win32com.client
+from pptx import Presentation
+
+
+POWERPOINT_EXTENSIONS = {".pptx", ".pptm", ".ppt"}
+
+
+def safe_filename(name: str, fallback: str, max_length: int = 80) -> str:
+    if not name or not str(name).strip():
+        return fallback
+
+    name = str(name).strip()
+
+    # Steuerzeichen entfernen, z. B. \x0b aus PowerPoint
+    name = re.sub(r"[\x00-\x1f\x7f]", " ", name)
+
+    # Windows-verbotene Zeichen ersetzen
+    name = re.sub(r'[<>:"/\\|?*]', "_", name)
+
+    # Mehrfach-Leerzeichen / Unterstriche bereinigen
+    name = re.sub(r"\s+", " ", name)
+    name = re.sub(r"_+", "_", name)
+
+    # Windows mag keine Punkte/Leerzeichen am Ende
+    name = name.strip(" ._")
+
+    # Reservierte Windows-Dateinamen vermeiden
+    reserved = {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    }
+
+    if name.upper() in reserved:
+        name = f"{name}_file"
+
+    name = name[:max_length].strip(" ._")
+
+    return name if name else fallback
+
+
+def find_powerpoints(source_dir: Path):
+    for file in source_dir.rglob("*"):
+        if file.is_file() and file.suffix.lower() in POWERPOINT_EXTENSIONS:
+            yield file
+
+
+def extract_slide_number(filename: str) -> int:
+    match = re.search(r"(\d+)", filename)
+    return int(match.group(1)) if match else 999999
+
+
+def unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    counter = 2
+    while True:
+        candidate = path.parent / f"{path.stem}_{counter}{path.suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def get_slide_title(slide, index: int) -> str:
+    if slide.shapes.title and slide.shapes.title.text.strip():
+        return safe_filename(slide.shapes.title.text, f"Folie_{index:03d}")
+
+    for shape in slide.shapes:
+        if hasattr(shape, "text") and shape.text.strip():
+            first_line = shape.text.strip().splitlines()[0]
+            return safe_filename(first_line, f"Folie_{index:03d}")
+
+    return f"Folie_{index:03d}"
+
+
+def extract_slide_text(slide) -> str:
+    texts = []
+
+    for shape in slide.shapes:
+        if hasattr(shape, "text") and shape.text.strip():
+            texts.append(shape.text.strip())
+
+        if getattr(shape, "has_table", False):
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        texts.append(cell.text.strip())
+
+    return "\n".join(texts)
+
+
+def extract_slide_notes(slide) -> str:
+    if not slide.has_notes_slide:
+        return ""
+
+    notes = []
+
+    for shape in slide.notes_slide.shapes:
+        if hasattr(shape, "text") and shape.text.strip():
+            text = shape.text.strip()
+
+            ignore = {
+                "click to add notes",
+                "klicken, um notizen hinzuzufügen",
+                "notizen hinzufügen",
+            }
+
+            if text.lower() not in ignore:
+                notes.append(text)
+
+    return "\n".join(notes)
+
+
+def export_slides_with_powerpoint(powerpoint_file: Path, temp_export_dir: Path, log):
+    """
+    PowerPoint exportiert manchmal direkt nach temp_export_dir,
+    manchmal in einen Unterordner. Deshalb wird danach rekursiv gesucht.
+    Der temporäre Exportordner wird später komplett gelöscht.
+    """
+
+    powerpoint = None
+    presentation = None
+
+    pythoncom.CoInitialize()
+
+    try:
+        log("Starte Microsoft PowerPoint COM...")
+
+        powerpoint = win32com.client.DispatchEx("PowerPoint.Application")
+        powerpoint.Visible = True
+
+        presentation = powerpoint.Presentations.Open(
+            str(powerpoint_file),
+            ReadOnly=True,
+            Untitled=False,
+            WithWindow=True
+        )
+
+        temp_export_dir.mkdir(parents=True, exist_ok=True)
+
+        log("Exportiere Folien als PNG...")
+        presentation.Export(str(temp_export_dir), "PNG", 1920, 1080)
+
+        png_files = list({
+            p.resolve(): p
+            for p in temp_export_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() == ".png"
+        }.values())
+
+        png_files = sorted(
+            png_files,
+            key=lambda p: extract_slide_number(p.name)
+        )
+
+        log(f"Gefundene PNGs nach Export: {len(png_files)}")
+
+        if not png_files:
+            raise RuntimeError(
+                "PowerPoint hat keine PNG-Dateien erzeugt. "
+                "Bitte prüfen, ob die Datei manuell in PowerPoint geöffnet werden kann."
+            )
+
+        return png_files
+
+    finally:
+        if presentation is not None:
+            presentation.Close()
+
+        if powerpoint is not None:
+            powerpoint.Quit()
+
+        pythoncom.CoUninitialize()
+
+
+def remove_folder_recursive(folder: Path, log):
+    if not folder.exists():
+        return
+
+    try:
+        for file in folder.rglob("*"):
+            if file.is_file():
+                file.unlink()
+
+        for subfolder in sorted(folder.rglob("*"), reverse=True):
+            if subfolder.is_dir():
+                subfolder.rmdir()
+
+        folder.rmdir()
+
+    except Exception as e:
+        log(f"Hinweis: Temporärer Ordner konnte nicht vollständig gelöscht werden: {e}")
+
+
+def process_powerpoint(powerpoint_file: Path, target_root: Path, log):
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    folder_name = f"{timestamp}_{safe_filename(powerpoint_file.stem, 'PowerPoint')}"
+    result_dir = target_root / folder_name
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    log("")
+    log(f"Verarbeite: {powerpoint_file}")
+    log(f"Zielordner: {result_dir}")
+
+    prs = Presentation(powerpoint_file)
+
+    slide_titles = []
+    all_slide_texts = []
+    all_slide_notes = []
+
+    for i, slide in enumerate(prs.slides, start=1):
+        raw_title = get_slide_title(slide, i)
+        clean_title = safe_filename(raw_title, f"Folie_{i:03d}")
+        slide_titles.append(clean_title)
+
+
+        slide_text = extract_slide_text(slide)
+        slide_notes = extract_slide_notes(slide)
+
+        all_slide_texts.append(
+            f"===== Folie {i}: {clean_title} =====\n"
+            f"{slide_text}\n"
+        )
+
+        if slide_notes.strip():
+            all_slide_notes.append(
+                f"===== Folie {i}: {clean_title} =====\n"
+                f"{slide_notes}\n"
+            )
+
+    texts_file = result_dir / "Alle_Folientexte.txt"
+    texts_file.write_text("\n\n".join(all_slide_texts), encoding="utf-8")
+
+    notes_file = result_dir / "Alle_Notizen.txt"
+    notes_file.write_text("\n\n".join(all_slide_notes), encoding="utf-8")
+
+    log("Texte gespeichert: Alle_Folientexte.txt")
+    log("Notizen gespeichert: Alle_Notizen.txt")
+
+    temp_export_dir = result_dir / "_ppt_png_export"
+    png_files = export_slides_with_powerpoint(powerpoint_file, temp_export_dir, log)
+
+    for i, png in enumerate(png_files, start=1):
+        if i <= len(slide_titles):
+            raw_title = slide_titles[i - 1]
+        else:
+            raw_title = f"Folie_{i:03d}"
+
+        clean_title = safe_filename(raw_title, f"Folie_{i:03d}")
+        target_png = unique_path(result_dir / f"{clean_title}.png")
+
+        png.replace(target_png)
+        log(f"PNG gespeichert: {target_png.name}")
+
+    remove_folder_recursive(temp_export_dir, log)
+
+    log(f"Fertig: {powerpoint_file.name}")
+
+
+class PowerPointExtractorGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("PowerPoint Extractor für Windows")
+        self.root.geometry("900x520")
+
+        self.source_var = StringVar()
+        self.target_var = StringVar()
+        self.is_running = False
+
+        Label(root, text="Source Folder:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        Entry(root, textvariable=self.source_var, width=90).grid(row=0, column=1, padx=10)
+        Button(root, text="Auswählen", command=self.choose_source).grid(row=0, column=2, padx=10)
+
+        Label(root, text="Zielordner:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        Entry(root, textvariable=self.target_var, width=90).grid(row=1, column=1, padx=10)
+        Button(root, text="Auswählen", command=self.choose_target).grid(row=1, column=2, padx=10)
+
+        self.start_button = Button(
+            root,
+            text="Start",
+            command=self.start_processing,
+            width=25
+        )
+        self.start_button.grid(row=2, column=1, pady=15)
+
+        self.log_box = Text(root, height=24, width=115)
+        self.log_box.grid(row=3, column=0, columnspan=3, padx=10, pady=10)
+
+    def choose_source(self):
+        folder = filedialog.askdirectory(title="Source Folder auswählen")
+        if folder:
+            self.source_var.set(folder)
+
+    def choose_target(self):
+        folder = filedialog.askdirectory(title="Zielordner auswählen")
+        if folder:
+            self.target_var.set(folder)
+
+    def log(self, message: str):
+        self.log_box.insert(END, message + "\n")
+        self.log_box.see(END)
+        self.root.update_idletasks()
+
+    def start_processing(self):
+        if self.is_running:
+            messagebox.showinfo("Läuft bereits", "Die Verarbeitung läuft bereits.")
+            return
+
+        if not self.source_var.get().strip():
+            messagebox.showerror("Fehler", "Bitte Source Folder auswählen.")
+            return
+
+        if not self.target_var.get().strip():
+            messagebox.showerror("Fehler", "Bitte Zielordner auswählen.")
+            return
+
+        self.is_running = True
+        self.start_button.config(state="disabled")
+
+        thread = threading.Thread(target=self.run_processing, daemon=True)
+        thread.start()
+
+    def run_processing(self):
+        try:
+            source_dir = Path(self.source_var.get()).expanduser().resolve()
+            target_dir = Path(self.target_var.get()).expanduser().resolve()
+
+            if not source_dir.exists():
+                self.log("Fehler: Source Folder existiert nicht.")
+                return
+
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            powerpoints = list(find_powerpoints(source_dir))
+
+            if not powerpoints:
+                self.log("Keine PowerPoint-Dateien gefunden.")
+                return
+
+            self.log(f"{len(powerpoints)} PowerPoint-Datei(en) gefunden.")
+
+            for powerpoint_file in powerpoints:
+                try:
+                    process_powerpoint(powerpoint_file, target_dir, self.log)
+                except Exception as e:
+                    self.log("")
+                    self.log(f"FEHLER bei Datei: {powerpoint_file}")
+                    self.log(str(e))
+                    self.log(traceback.format_exc())
+
+            self.log("")
+            self.log("Alle Dateien verarbeitet.")
+
+        finally:
+            self.is_running = False
+            self.start_button.config(state="normal")
+
+
+if __name__ == "__main__":
+    root = Tk()
+    app = PowerPointExtractorGUI(root)
+    root.mainloop()
