@@ -72,16 +72,98 @@ def unique_path(path: Path) -> Path:
         counter += 1
 
 
-def get_slide_title(slide, index: int) -> str:
-    if slide.shapes.title and slide.shapes.title.text.strip():
-        return safe_filename(slide.shapes.title.text, f"Folie_{index:03d}")
+def get_shape_text(shape) -> str:
+    if hasattr(shape, "text") and shape.text.strip():
+        return shape.text.strip()
+    return ""
+
+
+def get_first_text_line(text: str) -> str:
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def get_shape_font_size_score(shape) -> float:
+    """
+    Ermittelt eine ungefähre Textgröße.
+    Priorität:
+    1. echte Fontgröße aus Runs
+    2. Shape-Höhe als Fallback
+    """
+
+    max_size = 0.0
+
+    if hasattr(shape, "text_frame") and shape.text_frame:
+        for paragraph in shape.text_frame.paragraphs:
+            for run in paragraph.runs:
+                if run.font.size:
+                    # font.size ist in EMU, pt gibt Punkte zurück
+                    max_size = max(max_size, float(run.font.size.pt))
+
+    if max_size > 0:
+        return max_size
+
+    # Fallback, wenn PowerPoint keine Fontgröße liefert
+    try:
+        return float(shape.height)
+    except Exception:
+        return 0.0
+
+
+def find_biggest_text_in_upper_third(slide, slide_height):
+    upper_limit = slide_height / 3
+
+    best_text = ""
+    best_score = 0.0
 
     for shape in slide.shapes:
-        if hasattr(shape, "text") and shape.text.strip():
-            first_line = shape.text.strip().splitlines()[0]
-            return safe_filename(first_line, f"Folie_{index:03d}")
+        text = get_shape_text(shape)
+        if not text:
+            continue
 
-    return f"Folie_{index:03d}"
+        # Nur Text im oberen Drittel berücksichtigen
+        if shape.top > upper_limit:
+            continue
+
+        first_line = get_first_text_line(text)
+        if not first_line:
+            continue
+
+        score = get_shape_font_size_score(shape)
+
+        if score > best_score:
+            best_score = score
+            best_text = first_line
+
+    return best_text, best_score
+
+
+def get_slide_title(slide, index: int, slide_height) -> str:
+    fallback = f"Folie_{index:03d}"
+
+    tagged_title_text = ""
+    tagged_title_score = 0.0
+
+    if slide.shapes.title and slide.shapes.title.text.strip():
+        tagged_title_text = get_first_text_line(slide.shapes.title.text)
+        tagged_title_score = get_shape_font_size_score(slide.shapes.title)
+
+    biggest_text, biggest_score = find_biggest_text_in_upper_third(slide, slide_height)
+
+    # Wenn der größte Text im oberen Drittel größer ist als der PowerPoint-Titel,
+    # dann diesen als Titel verwenden.
+    if biggest_text and biggest_score > tagged_title_score:
+        return safe_filename(biggest_text, fallback)
+
+    if tagged_title_text:
+        return safe_filename(tagged_title_text, fallback)
+
+    if biggest_text:
+        return safe_filename(biggest_text, fallback)
+
+    return fallback
 
 
 def extract_slide_text(slide) -> str:
@@ -219,7 +301,7 @@ def process_powerpoint(powerpoint_file: Path, target_root: Path, log):
     all_slide_notes = []
 
     for i, slide in enumerate(prs.slides, start=1):
-        raw_title = get_slide_title(slide, i)
+        raw_title = get_slide_title(slide, i, prs.slide_height)
         clean_title = safe_filename(raw_title, f"Folie_{i:03d}")
 
         slide_titles.append(clean_title)
